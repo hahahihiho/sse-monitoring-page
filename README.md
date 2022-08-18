@@ -18,3 +18,5 @@
     2. Send transaction
     `$ npx hardhat run ./scripts/test-sample.js`
 
+## How to use this app
+* create .js file on the `/projects` directory by referring to the `/projects/test-sample.js`
