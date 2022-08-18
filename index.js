@@ -71,6 +71,11 @@ const listening = (project_file) => {
     return listener;
 }
 
+/**
+ *  When does the listening would be called
+ *  1. at the first time : clients[project] == undefined
+ *  2. listener's _events are broken : check clients[project].listener.provider._events length == 0
+ */
 function eventExists(project){
     try {
         if (clients[project].listener._events.length > 0) return true;
@@ -101,15 +106,10 @@ project_list.forEach(project_file=>{
         res.writeHead(200, headers);
         const clientId = project+"_"+Date.now();
         
-        // subscribe once per project
-        /**
-         *  When does the listening would be called
-         *  1. at the first time : clients[project] == undefined
-         *  2. listener's _events are broken : check clients[project].listener.provider._events length == 0
-         */
         if(clients[project] == undefined){
             clients[project] = {res:[]};
         }
+        // subscribe once per project
         if(!eventExists(project)){
             const listener = listening(project_file,clients[project]);
             clients[project].listener = listener;
