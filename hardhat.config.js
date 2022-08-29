@@ -1,3 +1,4 @@
+require("@nomiclabs/hardhat-waffle"); // ethers
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   defaultNetwork : "localhost",
