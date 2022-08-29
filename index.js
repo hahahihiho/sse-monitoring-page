@@ -1,18 +1,43 @@
 const path = require("path")
 const fs = require("fs");
+
+const tx_util = require("./modules/ethers-tx-util");
+
 const express = require('express')
 
-const app = express()
 const port = 3000
+const PROJECT_PATH = path.join(__dirname,"projects")
 
-const PROJECT_PATH = "projects"
-const project_list = fs.readdirSync(path.join(__dirname,PROJECT_PATH));
+const app = express()
 const index_html = fs.readFileSync(path.join(__dirname,"index.html"),"utf-8");
 const toLink = (link,name=link) => `<a href="/${link}">${name}</a>`
 const toLinks = (links) => links.map(l=>toLink(l)).join("")
-const html_with_nav = index_html.replace('{{nav}}', toLink("","Home") + toLinks(project_list.map(p=>p.split(".")[0])));
+const html_with_nav = index_html.replace('{{nav}}', toLink("","Home") + toLinks(getProjects()));
 
 const clients = {};
+const project_modules = importProjects();
+
+/** import projects */
+function getProjectFiles(){
+    return fs.readdirSync(PROJECT_PATH).filter(p=>path.extname(p) == ".js")
+}
+function getProjectPaths(){
+    return getProjectFiles().map(p=>path.join(PROJECT_PATH,p));
+}
+function getProjects(){
+    return getProjectFiles().map(p=>p.slice(0,-3))
+}
+
+function importProjects(){
+    const project_modules = {}
+    const project_paths = getProjectPaths()
+    const projects = getProjects()
+    for(let i=0;i<project_paths.length;i++){
+        project_modules[projects[i]] = require(project_paths[i]);
+    }
+    return project_modules;
+}
+
 /** html handle functions */
 const toTable = (kvPair) => {
     let table = '<table style="border 1px">'
@@ -40,46 +65,40 @@ const toScript = (url) => {
     }`
 }
 
-/** get functions from projects */
-const getData = async (project_file) => {
-    let data;
-    const module_path = "./"+path.join(PROJECT_PATH,project_file)
+/** 
+ * 
+ * get functions from projects 
+ * 
+ */ 
+const getData = async (project) => {
+    let data = {empty:"data",test:[1,2,3]};
     try {
-        data = await (require(module_path).getData());
+        data = await (project_modules[project].getData());
     } catch (error) {
         // console.error(error);
-        console.warn("no module ",module_path);
-        data = {empty:"data",test:[1,2,3]};
+        console.warn("error on ",project," getData");
     }
-    // data["page"] = project_file.split(".")[0];
     return data;
 }
 
-const listening = (project_file) => {
+const listening = (project) => {
     let listener = {};
-    const project = project_file.split(".")[0];
-    const module_path = "./"+path.join(PROJECT_PATH,project_file)
     try {
-        listener = require(module_path).listening((data) => sendEventsToAll(project,toTable(data)));
-        listener._websocket.on("error",err => {
-            console.error("There is connection issue");
-            console.error(err);
-        }) // connection issue
+        listener = project_modules[project].listening((data) => sendEventsToAll(project,toTable(data)));
     } catch (error) {
-        console.warn("no module ",module_path);
+        console.error(error);
+        console.warn("error on ",project," listening");
     }
     return listener;
 }
 
-/**
- *  When does the listening would be called
- *  1. at the first time : clients[project] == undefined
- *  2. listener's _events are broken : check clients[project].listener.provider._events length == 0
- */
-function eventExists(project){
+async function isListening(project){
     try {
-        if (clients[project].listener._events.length > 0) return true;
-        else return false;
+        if (await clients[project].listener.isConnected() && clients[project].listener._events.length > 0) return true;
+        else {
+            clients[project].closeConnection();
+            return false;
+        }
     } catch {
         return false;
     }
@@ -92,8 +111,7 @@ app.get('/', (req, res) => {
 })
 
 // project page
-project_list.forEach(project_file=>{
-    const project = project_file.split(".")[0]
+getProjects().forEach(project=>{
     const url = "/" + project
     // subscribe page
     app.get(url+"/subscribe", (req,res) => {
@@ -109,11 +127,15 @@ project_list.forEach(project_file=>{
         if(clients[project] == undefined){
             clients[project] = {res:[]};
         }
-        // subscribe once per project
-        if(!eventExists(project)){
-            const listener = listening(project_file,clients[project]);
-            clients[project].listener = listener;
-        }
+
+        // subscribe when the project is not listening
+        isListening(project).then(is => {
+            if(!is){
+                const listener = listening(project,clients[project]);
+                clients[project].listener = listener;
+            }
+        })
+
         // store client response for sse
         const newClient = { id : clientId, res }
         clients[project].res.push(newClient)
@@ -126,7 +148,7 @@ project_list.forEach(project_file=>{
 
     // page
     app.get(url, async (req,res) => {
-        data = await getData(project_file);
+        data = await getData(project);
         let html_result = html_with_nav.replace("{{script}}",toScript(url));
         html_result = html_result.replace("{{table}}",toTable(data))
         res.write(html_result);
